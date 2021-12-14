@@ -1,12 +1,13 @@
 .tweet-wrapper{
     margin-bottom: 25px;
+    min-width: 100%;
 }
 .tweet-txt{
     text-align: justify;
 }
 
 .tweet{
-    padding: 25px;
+    padding: 5px;
     background-color: #FFF;
 }
 
@@ -24,8 +25,7 @@
 }
 
 .tweet-txt{
-    margin-top: 10px;
     font-size: 15px;
-    font-weight: 200;
+    font-weight: 400;
 }
 

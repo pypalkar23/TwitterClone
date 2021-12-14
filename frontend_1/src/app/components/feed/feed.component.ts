@@ -6,14 +6,17 @@ import { TwitterService } from 'src/app/service/twitter-service.service';
   styleUrls: ['./feed.component.scss']
 })
 export class FeedComponent implements OnInit {
-  
-  
-  constructor(twitterService: TwitterService) { 
-    let data = {'userID':'mandar','value':''}
-    twitterService.sendDataToserver(JSON.stringify(data))
+
+  feedText: String[] = [];
+  userId: any = '';
+  constructor(private twitterService: TwitterService) {
+    this.userId = twitterService.getUser();
+    this.twitterService.tweetSubject.subscribe({ next: (feedentry) => { if(feedentry && feedentry.trim().length!=0) this.feedText.unshift(feedentry.replace("\^"," ")); } });
+    //twitterService.sendDataToserver(JSON.stringify(data))
   }
 
   ngOnInit(): void {
+    this.twitterService.sendDataToserver(JSON.stringify({ 'userID': this.userId, 'value': '' }))
   }
 
 

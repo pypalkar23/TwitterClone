@@ -1,11 +1,11 @@
 <div class="follow-wrapper container-fluid">
     <div class="heading-follow">Follow User</div>
     <div class="shadow p-3">
+        <div id="emailHelp" *ngIf="notificationMsg.length>0" [ngClass]="{'errorMsg':(isError), 'successMsg':(!isError), 'form-text':true}">{{notificationMsg}}</div>
       <div class="mb-3">
         <label htmlFor="exampleInputEmail1" class="form-label">Username</label>
-        <input type="text" class="form-control" id="exampleInputEmail1" aria-describedby="emailHelp" />
-        <div id="emailHelp" class="form-text">We'll never share your email with anyone else.</div>
+        <input type="text" class="form-control" id="exampleInputEmail1" aria-describedby="emailHelp" [(ngModel)]='username'/>
       </div>
-      <button type="submit" class="btn btn-primary">Follow</button>
+      <button type="submit" class="btn btn-primary"(click)="follow()">Follow</button>
     </div>
   </div>

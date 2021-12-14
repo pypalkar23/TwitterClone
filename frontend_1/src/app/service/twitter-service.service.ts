@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { webSocket } from 'rxjs/webSocket';
 import { HttpClient } from '@angular/common/http'
 import { environment } from 'src/environments/environment';
+import { Subject } from 'rxjs';
 
 const userField: string = 'twitter-user';
 const websocketurl: string = `${environment.webSocketBase}/feed`
@@ -16,25 +17,32 @@ const FOLLOW_URL: string = `${environment.apiBase}/follow`
 })
 
 export class TwitterService {
-  subject: any;
+  webSocket: any;
+  tweetSubject = new Subject<string>();
 
   constructor(private http: HttpClient) {
-    this.initializeWebSocket();
+    //this.initializeWebSocket();
+    if(this.webSocket==null){
+      this.initializeWebSocket();
+    }
   }
 
   storeUser(userId: string) {
     localStorage.setItem(userField, userId)
   }
 
-  getUser() {
-    localStorage.getItem(userField);
+  getUser():string {
+    return localStorage.getItem(userField) || "";
+  }
+
+  removeUser(){
+    localStorage.removeItem(userField);
   }
 
   initializeWebSocket() {
-    console.log("initialized");
     console.log(websocketurl);
-    this.subject = webSocket(websocketurl);
-    this.subject.subscribe(
+    this.webSocket = webSocket(websocketurl);
+    this.webSocket.subscribe(
       (msg: string) => {
         console.log("Message Received",msg);
         this.processMessage(msg);
@@ -45,36 +53,63 @@ export class TwitterService {
   }
 
   isLoggedIn() {
-    return this.getUser() != undefined && this.getUser() != null;
+    //console.log(this.getUser())
+    return this.getUser().length != 0;
   }
 
-  processMessage(msg: string) {
+  closeWebSocket(){
+    this.webSocket.complete();
+  }
 
+  processMessage(msg:any) {
+      //console.log(msg);
+      let msgstr;
+      let service;
+      if(msg && msg.code && msg.code == "OK"){
+       if(msg.message && !msg.message.startsWith("No feeds")){
+         msgstr = msg.message;
+       }
+       if(msg.service){
+         service = msg.service
+       }
+
+       if(msgstr && service){
+         if(service == 'LiveFeed'){
+           let msgArr = msgstr.split("-");
+           msgArr.forEach((element:string) => {
+             this.tweetSubject.next(element);
+           });
+         }
+         else{
+          this.tweetSubject.next(msgstr);
+         }
+       }
+      }      
   }
 
   sendDataToserver(msg: string) {
     console.log("Sending message to server", msg);
-    this.subject.next(msg)
+    this.webSocket.next(msg)
   }
   
   userLogin(userID:string, password:string){
-    return this.http.post<any>(TWEET_URL,{userID:userID,value:password})
+    return this.http.post<any>(LOGIN_URL,{userID:userID,value:password})
   }
 
   userRegister(userID:string, password:string){
     return this.http.post<any>(REGISTER_URL,{userID:userID,value:password})
   }
 
-  userFollow(userID:string, val:string){
-    return this.http.post<any>(FOLLOW_URL,{userID:userID,value:val})
+  userFollow(val:string){
+    return this.http.post<any>(FOLLOW_URL,{userID:this.getUser(),value:val})
   }
 
-  userTweet(userID:string, val:string){
-    return this.http.post<any>(TWEET_URL,{userID:userID,value:val})
+  userTweet(val:string){
+    return this.http.post<any>(TWEET_URL,{userID:this.getUser(),value:val})
   }
 
-  userRetweet(userID:string, val:string){
-    return this.http.post<any>(RETWEET_URL,{userID:userID,value:val})
+  userRetweet(val:string){
+    return this.http.post<any>(RETWEET_URL,{userID:this.getUser(),value:val})
   }
   
 }
