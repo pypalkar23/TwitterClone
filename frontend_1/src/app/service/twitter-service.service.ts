@@ -36,11 +36,12 @@ export class TwitterService {
   }
 
   removeUser(){
+    this.webSocket.complete();
     localStorage.removeItem(userField);
   }
 
   initializeWebSocket() {
-    console.log(websocketurl);
+    //console.log(websocketurl);
     this.webSocket = webSocket(websocketurl);
     this.webSocket.subscribe(
       (msg: string) => {
