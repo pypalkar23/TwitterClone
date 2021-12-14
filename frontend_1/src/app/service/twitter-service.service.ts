@@ -19,6 +19,8 @@ const FOLLOW_URL: string = `${environment.apiBase}/follow`
 export class TwitterService {
   webSocket: any;
   tweetSubject = new Subject<string>();
+  successFlag = "success";
+  errorFlag ="error";
 
   constructor(private http: HttpClient) {
     //this.initializeWebSocket();
@@ -66,12 +68,12 @@ export class TwitterService {
       //console.log(msg);
       let msgstr;
       let service;
-      if(msg && msg.code && msg.code == "OK"){
+      if(msg && msg.status && msg.status == this.successFlag){
        if(msg.message && !msg.message.startsWith("No feeds")){
          msgstr = msg.message;
        }
-       if(msg.service){
-         service = msg.service
+       if(msg.resptype){
+         service = msg.resptype
        }
 
        if(msgstr && service){

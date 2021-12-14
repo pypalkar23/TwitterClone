@@ -21,9 +21,9 @@ export class FollowComponent implements OnInit {
     this.twitterService.userFollow(this.username).subscribe((resp) => {
       console.log(resp);
       let respObj = JSON.parse(resp);
-      let status = respObj.code;
+      let status = respObj.status;
       let message = respObj.message;
-      if (status == 'OK') {
+      if (status == this.twitterService.successFlag) {
         this.reset();
       }
       else {

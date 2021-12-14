@@ -1,7 +1,10 @@
 
   <div class="col-lg-11 col-md-11">
     <div class="heading">Tweet Feed</div>
-    <div class="tweet-feed">
+    <div *ngIf="feedText.length==0"class="tweet-feed">
+        No Updates on Feed Yet...!
+    </div>
+    <div *ngIf="feedText.length>0"class="tweet-feed">
       <div *ngFor= "let entry of feedText" class="tweet-wrapper justify-content-left">
         <div class= "tweet shadow-sm p-3">
         <div class="tweet-txt">{{entry}}</div>

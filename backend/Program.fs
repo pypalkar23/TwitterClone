@@ -5,217 +5,236 @@ open Akka.Actor
 open Suave
 open Suave.Operators
 open Suave.Filters
-open Suave.Writers
 open Suave.Successful
 open Suave.Logging
 open Suave.Sockets
 open Suave.Sockets.Control
 open Suave.WebSocket
-open Newtonsoft.Json
-open Newtonsoft.Json.Serialization
+open Constants
 open Util
 
-let system = ActorSystem.Create("TwitterServer")
-let mutable hashTagsMap = Map.empty
-let mutable mentionsMap = Map.empty
-let mutable registeredUsers = Map.empty
-let mutable globalfollowers = Map.empty
 
-let initialCapacity = 101
-let numProcs = Environment.ProcessorCount
-
+let system = ActorSystem.Create("TwitterCloneServer")
+let mutable followersStore = Map.empty
+let mutable hashTagsStore = Map.empty
+let mutable mentionsStore = Map.empty
+let mutable userStore = Map.empty
 type FeedMessages = 
   | Register of (string)
-  | Subscribers of (string*string)
+  | SubscribeTo of (string*string)
   | MarkActive of (string*WebSocket)
   | MarkInactive of (string)
-  | UpdateFeeds of (string*string*string)
+  | BroadcastToFeeds of (string*string*string)
 
-type TweetMessages = 
-  | InitTweet of (IActorRef)
-  | AddRegisteredUser of (string)
-  | TweetRequest of (string*string*string)
-
-
-
-let agent = MailboxProcessor<string*WebSocket>.Start(fun inbox ->
-  let rec messageLoop() = async {
-    let! msg,webSkt = inbox.Receive()
-    let byteRes =
-      msg
-      |> System.Text.Encoding.ASCII.GetBytes
-      |> ByteSegment
-    let! _ = webSkt.send Text byteRes true
-    return! messageLoop()
+let msgSender = MailboxProcessor<string*WebSocket>.Start(fun inbox ->
+  let rec loop() = async {
+    let! msg,webSocket = inbox.Receive()
+    let byteRes = toByteSegment msg
+    let! _ = webSocket.send Text byteRes true
+    return! loop()
   }
-  messageLoop()
+  loop()
 )
 
-let FeedActor (mailbox:Actor<_>) = 
-  let mutable followers = Map.empty
-  let mutable activeUsers = Map.empty
-  let mutable feedtable = Map.empty
+let FeedManager (mailbox:Actor<_>) = 
+  let mutable followerMap = Map.empty
+  let mutable activeUsersMap = Map.empty
+  let mutable feedMap = Map.empty
   let rec loop () = actor {
       let! message = mailbox.Receive() 
       match message with
+      
       | Register(userId) ->
-        followers <- Map.add userId Set.empty followers
-        feedtable <- Map.add userId List.empty feedtable
-        // printfn "Followers Map: %A" followers
-      | Subscribers(userId, followerId) ->
-        if followers.ContainsKey followerId then
+        followerMap <- Map.add userId Set.empty followerMap
+        feedMap <- Map.add userId List.empty feedMap
+      
+      | SubscribeTo(userId, followerId) ->
+        if followerMap.ContainsKey followerId then
           let mutable followSet = Set.empty
-          followSet <- followers.[followerId]
+          followSet <- followerMap.[followerId]
           followSet <- Set.add userId followSet
-          followers <- Map.remove followerId followers 
-          followers <- Map.add followerId followSet followers
-          // printfn "User %s started following you! for %s" userId followerId
-          let mutable jsonData: ResponseType = 
-            {userID = followerId; service= "Follow"; code = "OK"; message = sprintf "User %s started following you!" userId}
-          let mutable consJson = Json.serialize jsonData
-          // printfn "consjaosn = %A" consJson
-          agent.Post (consJson,activeUsers.[followerId])
+          followerMap <- Map.remove followerId followerMap 
+          followerMap <- Map.add followerId followSet followerMap
+          //let mutable jsonData: ResponseType = 
+            //{userID = followerId; service= "Follow"; code = "OK"; message = sprintf "User %s started following you!" userId}
+          let respData = prepareResponse (followerId, sprintf "User %s started following you!" userId, SERVICE_TYPE_FOLLOW, false)
+          let mutable respJson = Json.serialize respData
+          msgSender.Post (respJson,activeUsersMap.[followerId])
+    
+      | BroadcastToFeeds(userId,tweetMsg,respType) ->
+        if followerMap.ContainsKey userId then
+          let mutable rtype = ""
+          
+          if respType = "Tweet" then
+            rtype <- sprintf "%s has tweeted:" userId
+          
+          else 
+            rtype <- sprintf "%s has re-tweeted:" userId
+          
+          for followerId in followerMap.[userId] do 
+            if followerMap.ContainsKey followerId then
+              if activeUsersMap.ContainsKey followerId then
+                let twt = sprintf "%s %s" rtype tweetMsg
+                //let jsonData: ResponseType = {userID = followerId; service=respType; code="OK"; message = twt}
+                let respData = prepareResponse(followerId, twt, respType, false)
+                let respJson = Json.serialize respData
+                msgSender.Post (respJson, activeUsersMap.[followerId])
+              let mutable listy = []
+              if feedMap.ContainsKey followerId then
+                  listy <- feedMap.[followerId]
+              listy  <- (sprintf "%s %s" rtype tweetMsg) :: listy
+              feedMap <- Map.remove followerId feedMap
+              feedMap <- Map.add followerId listy feedMap
+
       | MarkActive(userId,userWebSkt) ->
-        if activeUsers.ContainsKey userId then  
-          activeUsers <- Map.remove userId activeUsers
-        activeUsers <- Map.add userId userWebSkt activeUsers 
-        let mutable feedsPub = ""
-        let mutable sertype = ""
-        if feedtable.ContainsKey userId then
-          let mutable feedsTop = ""
-          let mutable fSize = 10
-          let feedList:List<string> = feedtable.[userId]
+        if activeUsersMap.ContainsKey userId then  
+          activeUsersMap <- Map.remove userId activeUsersMap
+        activeUsersMap <- Map.add userId userWebSkt activeUsersMap
+        let mutable userFeed = ""
+        let mutable responseType = ""
+        
+        if feedMap.ContainsKey userId then
+          let mutable feedHead = ""
+          let mutable maxFeedSize = 10
+          let feedList:List<string> = feedMap.[userId]
+          
           if feedList.Length = 0 then
-            sertype <- "Follow"
-            feedsPub <- sprintf "No feeds yet!!"
+            responseType <- SERVICE_TYPE_FOLLOW
+            userFeed <- sprintf "No feeds yet!!"
+          
           else
             if feedList.Length < 10 then
-                fSize <- feedList.Length
-            // printfn"fsize = %d" fSize
-            for i in [0..(fSize-1)] do
-              // printfn "feed %d = %s" i feedtable.[userId].[i]
-              feedsTop <- "-" + feedtable.[userId].[i] + feedsTop
+                maxFeedSize <- feedList.Length
+            
+            for i in [0..(maxFeedSize-1)] do
+              feedHead <- "-" + feedMap.[userId].[i] + feedHead
+            userFeed<- feedHead
+            responseType <- SERVICE_TYPE_LIVEFEED
 
-            feedsPub <- feedsTop
-            sertype <- "LiveFeed"
-          // printfn "feeds pub = %A" feedsPub
-          let jsonData: ResponseType = {userID = userId; message = feedsPub; code = "OK"; service=sertype}
-          let consJson = Json.serialize jsonData
-          agent.Post (consJson,userWebSkt) 
+          // let jsonData: ResponseType = {userID = userId; message = userFeed; code = "OK"; service=responseType}
+          let respData = prepareResponse(userId, userFeed, responseType, false)
+          let respJson = Json.serialize respData
+          msgSender.Post (respJson,userWebSkt) 
+
       | MarkInactive(userId) ->
-        if activeUsers.ContainsKey userId then  
-          activeUsers <- Map.remove userId activeUsers
-      | UpdateFeeds(userId,tweetMsg,sertype) ->
-        if followers.ContainsKey userId then
-          let mutable stype = ""
-          if sertype = "Tweet" then
-            stype <- sprintf "%s tweeted:" userId
-          else 
-            stype <- sprintf "%s re-tweeted:" userId
-          for foll in followers.[userId] do 
-            if followers.ContainsKey foll then
-              if activeUsers.ContainsKey foll then
-                let twt = sprintf "%s^%s" stype tweetMsg
-                let jsonData: ResponseType = {userID = foll; service=sertype; code="OK"; message = twt}
-                let consJson = Json.serialize jsonData
-                agent.Post (consJson,activeUsers.[foll])
-              let mutable listy = []
-              if feedtable.ContainsKey foll then
-                  listy <- feedtable.[foll]
-              listy  <- (sprintf "%s^%s" stype tweetMsg) :: listy
-              feedtable <- Map.remove foll feedtable
-              feedtable <- Map.add foll listy feedtable
+        if activeUsersMap.ContainsKey userId then  
+          activeUsersMap <- Map.remove userId activeUsersMap
       return! loop()
   }
   loop()
 
-let feedActor = spawn system (sprintf "FeedActor") FeedActor
+let feedmanager = spawn system (sprintf "FeedManager") FeedManager
 
-let liveFeed (webSocket : WebSocket) (context: HttpContext) =
+let webSocketHandler (webSocket : WebSocket) (context: HttpContext) =
   let rec loop() =
-    let mutable presentUser = ""
+    let mutable user = ""
     socket { 
       let! msg = webSocket.read()
       match msg with
       | (Text, data, true) ->
         let reqMsg = UTF8.toString data
-        printfn "%s" reqMsg
         let processedMsg = processedString reqMsg
-        printfn "%s" processedMsg
-        let parsed = Json.deserialize<RequestType> processedMsg
-        printfn "%s" parsed.userID
-        presentUser <- parsed.userID
-        feedActor <! MarkActive(parsed.userID, webSocket)
+        let jsonObj = Json.deserialize<TwitterRequest> processedMsg
+        user <- jsonObj.userID
+        feedmanager <! MarkActive(user, webSocket)
         return! loop()
+      
       | (Close, _, _) ->
-        printfn "Closed WEBSOCKET"
-        feedActor <! MarkInactive(presentUser)
+        printfn "Closing Websocket"
+        feedmanager <! MarkInactive(user)
         let emptyResponse = [||] |> ByteSegment
         do! webSocket.send Close emptyResponse true
+      
       | _ -> return! loop()
     }
   loop()
 
-let regNewUser userInput =
-  let mutable resp = ""
-  printf "register %s" userInput.userID
-  if registeredUsers.ContainsKey userInput.userID then
-    let rectype: ResponseType = {userID = userInput.userID; message = sprintf "User %s already registred" userInput.userID; service = "Register"; code = "FAIL"}
-    resp <- Json.serialize rectype
+let registerFn reqData =
+  let mutable respStr = ""
+  let userId =  reqData.userID
+  let value = reqData.value
+  //printf "register %s" userId
+  if userStore.ContainsKey userId then
+    //let respObj: ResponseType = {userID = userId; message = sprintf "User %s has already registred. Please go to login window" userId; service = "Register"; code = "FAIL"}
+    let respObj= prepareResponse (userId,"User with this name exists in the system. Please go to login window",SERVICE_TYPE_REGISTER,true) 
+    respStr <- Json.serialize respObj
+  
   else
-    registeredUsers <- Map.add userInput.userID userInput.value registeredUsers
-    globalfollowers <- Map.add userInput.userID Set.empty globalfollowers
-    feedActor <! Register(userInput.userID)
-    let rectype: ResponseType = {userID = userInput.userID; message = sprintf "User %s registred successfully" userInput.userID; service = "Register"; code = "OK"}
-    resp <- Json.serialize rectype
-  resp
+    userStore <- Map.add userId reqData.value userStore
+    followersStore <- Map.add userId Set.empty followersStore
+    feedmanager <! Register(userId)
+    let respObj= prepareResponse (userId,"Registeration Successful. Please go to login window",SERVICE_TYPE_REGISTER,false)
+    //let respObj: ResponseType = {userID = userId; message = sprintf "User %s has registered successfully" userId; service = "Register"; code = "OK"}
+    respStr <- Json.serialize respObj
+  respStr
 
-let loginUser userInput =
-  let mutable resp = ""
-  if registeredUsers.ContainsKey userInput.userID then
-    if registeredUsers.[userInput.userID] = userInput.value then
-      let rectype: ResponseType = {userID = userInput.userID; message = sprintf "User %s logged in successfully" userInput.userID; service = "Login"; code = "OK"}
-      resp <- Json.serialize rectype
+let loginFn reqData =
+  let mutable respStr = ""
+  let userId =  reqData.userID
+  let password = reqData.value
+  if userStore.ContainsKey userId then
+    
+    if userStore.[userId] = password then
+      //let respObj: ResponseType = {userID = userId; message = sprintf "User %s logged in successfully" userId; service = "Login"; code = "OK"}
+      let respObj= prepareResponse (userId,"Login Successful",SERVICE_TYPE_LOGIN,false)
+      respStr <- Json.serialize respObj
+    
     else 
-      let rectype: ResponseType = {userID = userInput.userID; message = "Invalid userid / password"; service = "Login"; code = "FAIL"}
-      resp <- Json.serialize rectype
+      let respObj= prepareResponse (userId,"Invalid Username or Password",SERVICE_TYPE_LOGIN,true)
+      //let respObj: ResponseType = {userID = userId; message = "Invalid userid / password"; service = "Login"; code = "FAIL"}
+      respStr <- Json.serialize respObj
+  
   else
-    let rectype: ResponseType = {userID = userInput.userID; message = "Invalid userid / password"; service = "Login"; code = "FAIL"}
-    resp <- Json.serialize rectype
-  resp
+    let respObj= prepareResponse (userId,"Invalid Username or Password",SERVICE_TYPE_LOGIN,true)
+    //let respObj: ResponseType = {userID = userId; message = "Invalid userid / password"; service = "Login"; code = "FAIL"}
+    respStr <- Json.serialize respObj
+  respStr
 
-let followUser userInput =
-  let mutable resp = ""
-  if userInput.value <> userInput.userID then
-    if globalfollowers.ContainsKey userInput.value then
-      if not (globalfollowers.[userInput.value].Contains userInput.userID) then
-        let mutable tempset = globalfollowers.[userInput.value]
-        tempset <- Set.add userInput.userID tempset
-        globalfollowers <- Map.remove userInput.value globalfollowers
-        globalfollowers <- Map.add userInput.value tempset globalfollowers
-        feedActor <! Subscribers(userInput.userID,userInput.value) 
-        let rectype: ResponseType = {userID = userInput.userID; service="Follow"; message = sprintf "You started following %s!" userInput.value; code = "OK"}
-        resp <- Json.serialize rectype
+let followFn reqData =
+  let mutable respStr = ""
+  let userId =  reqData.userID
+  let otheruser = reqData.value
+  if otheruser <> userId then
+    
+    if followersStore.ContainsKey otheruser then
+      
+      if not (followersStore.[otheruser].Contains userId) then
+        let mutable tempset = followersStore.[otheruser]
+        tempset <- Set.add userId tempset
+        followersStore <- Map.remove otheruser followersStore
+        followersStore <- Map.add otheruser tempset followersStore
+        feedmanager <! SubscribeTo(userId,otheruser) 
+        //let respObj: ResponseType = {userID = userId; service="Follow"; message = sprintf "You started following %s!" otheruser; code = "OK"}
+        let respObj= prepareResponse (userId ,sprintf "You started following %s!" otheruser, SERVICE_TYPE_FOLLOW ,false)
+        respStr <- Json.serialize respObj
+      
       else 
-        let rectype: ResponseType = {userID = userInput.userID; service="Follow"; message = sprintf "You are already following %s!" userInput.value; code = "FAIL"}
-        resp <- Json.serialize rectype      
-    else  
-      let rectype: ResponseType = {userID = userInput.userID; service="Follow"; message = sprintf "Invalid request, No such user (%s)." userInput.value; code = "FAIL"}
-      resp <- Json.serialize rectype
+        //let respObj: ResponseType = {userID = userId; service="Follow"; message = sprintf "You are already following %s!" otheruser; code = "FAIL"}
+        let respObj= prepareResponse (userId ,sprintf "You are already following %s!" otheruser, SERVICE_TYPE_FOLLOW ,true)
+        respStr <- Json.serialize respObj      
+    
+    else
+        let respObj= prepareResponse (userId ,sprintf "Invalid request, No such user (%s)." otheruser, SERVICE_TYPE_FOLLOW ,true)  
+        //let respObj: ResponseType = {userID = userId; service="Follow"; message = sprintf "Invalid request, No such user (%s)." otheruser; code = "FAIL"}
+        respStr <- Json.serialize respObj
+  
   else
-    let rectype: ResponseType = {userID = userInput.userID; service="Follow"; message = sprintf "You cannot follow yourself."; code = "FAIL"}
-    resp <- Json.serialize rectype   
-  // printfn "follow response: %s" resp
-  resp
+     let respObj= prepareResponse (userId ,"You cannot follow yourself.", SERVICE_TYPE_FOLLOW ,true)
+    //let respObj: ResponseType = {userID = userId; service="Follow"; message = sprintf "You cannot follow yourself."; code = "FAIL"}
+     respStr <- Json.serialize respObj   
+  respStr
   
-let tweetUser userInput =
+let tweetFn reqData =
   let mutable resp = ""
+  let userId = reqData.userID
+  let tweetTxt = reqData.value
   
-  if registeredUsers.ContainsKey userInput.userID then
+  if userStore.ContainsKey userId then
     let mutable hashTag = ""
     let mutable mentionedUser = ""
-    let parsed = userInput.value.Split ' '
+    let parsed = tweetTxt.Split ' '
     // printfn "parsed = %A" parsed
+    
     for parse in parsed do
       if parse.Length > 0 then
         if parse.[0] = '#' then
@@ -224,134 +243,160 @@ let tweetUser userInput =
           mentionedUser <- parse.[1..(parse.Length-1)]
 
     if mentionedUser <> "" then
-      if registeredUsers.ContainsKey mentionedUser then
-        if not (mentionsMap.ContainsKey mentionedUser) then
-            mentionsMap <- Map.add mentionedUser List.empty mentionsMap
-        let mutable mList = mentionsMap.[mentionedUser]
-        mList <- (sprintf "%s tweeted:^%s" userInput.userID userInput.value) :: mList
-        mentionsMap <- Map.remove mentionedUser mentionsMap
-        mentionsMap <- Map.add mentionedUser mList mentionsMap
-        feedActor <! UpdateFeeds(userInput.userID,userInput.value,"Tweet")
-        let rectype: ResponseType = {userID = userInput.userID; service="Tweet"; message = (sprintf "%s tweeted:^%s" userInput.userID userInput.value); code = "OK"}
-        resp <- Json.serialize rectype
+      if userStore.ContainsKey mentionedUser then
+        if not (mentionsStore.ContainsKey mentionedUser) then
+            mentionsStore <- Map.add mentionedUser List.empty mentionsStore
+        let mutable mList = mentionsStore.[mentionedUser]
+        mList <- (sprintf "%s tweeted: %s" userId tweetTxt) :: mList
+        mentionsStore <- Map.remove mentionedUser mentionsStore
+        mentionsStore <- Map.add mentionedUser mList mentionsStore
+        feedmanager <! BroadcastToFeeds(userId,tweetTxt,SERVICE_TYPE_TWEET)
+        let respObj= prepareResponse (userId ,sprintf "%s tweeted: %s" userId tweetTxt, SERVICE_TYPE_TWEET ,false)
+        // let respObj: ResponseType = {userID = userInput.userID; service="Tweet"; message = (sprintf "%s tweeted: %s" userInput.userID userInput.value); code = "OK"}
+        resp <- Json.serialize respObj
+      
       else
-        let rectype: ResponseType = {userID = userInput.userID; service="Tweet"; message = sprintf "Invalid request, mentioned user (%s) is not registered" mentionedUser; code = "FAIL"}
-        resp <- Json.serialize rectype
+        let respObj= prepareResponse (userId ,sprintf "Invalid request, mentioned user '%s' is not registered" mentionedUser, SERVICE_TYPE_TWEET ,true)
+        //let respObj: ResponseType = {userID = userId; service="Tweet"; message = sprintf "Invalid request, mentioned user (%s) is not registered" mentionedUser; code = "FAIL"}
+        resp <- Json.serialize respObj
+    
     else
-      feedActor <! UpdateFeeds(userInput.userID,userInput.value,"Tweet")
-      let rectype: ResponseType = {userID = userInput.userID; service="Tweet"; message = (sprintf "%s tweeted:^%s" userInput.userID userInput.value); code = "OK"}
-      resp <- Json.serialize rectype
+      feedmanager <! BroadcastToFeeds(userId,tweetTxt,SERVICE_TYPE_TWEET)
+      let respObj = prepareResponse (userId ,sprintf "%s tweeted: %s" userId tweetTxt, SERVICE_TYPE_TWEET ,false)
+      // let respObj: ResponseType = {userID = userId; service="Tweet"; message = (sprintf "%s tweeted: %s" userId tweetTxt); code = "OK"}
+      resp <- Json.serialize respObj
 
     if hashTag <> "" then
-      if not (hashTagsMap.ContainsKey hashTag) then
-        hashTagsMap <- Map.add hashTag List.empty hashTagsMap
-      let mutable tList = hashTagsMap.[hashTag]
-      tList <- (sprintf "%s tweeted:^%s" userInput.userID userInput.value) :: tList
-      hashTagsMap <- Map.remove hashTag hashTagsMap
-      hashTagsMap <- Map.add hashTag tList hashTagsMap
-  else  
-    let rectype: ResponseType = {userID = userInput.userID; service="Tweet"; message = sprintf "Invalid request by user %s, Not registered yet!" userInput.userID; code = "FAIL"}
-    resp <- Json.serialize rectype
+      if not (hashTagsStore.ContainsKey hashTag) then
+        hashTagsStore <- Map.add hashTag List.empty hashTagsStore
+      let mutable tList = hashTagsStore.[hashTag]
+      tList <- (sprintf "%s tweeted: %s" userId tweetTxt) :: tList
+      hashTagsStore <- Map.remove hashTag hashTagsStore
+      hashTagsStore <- Map.add hashTag tList hashTagsStore
+  
+  else
+    let respObj = prepareResponse (userId ,sprintf "Invalid request - user %s does not exist!" userId, SERVICE_TYPE_TWEET ,true)  
+    //let respObj: ResponseType = {userID = userId; service="Tweet"; message = sprintf "Invalid request by user %s, Not registered yet!" userId; code = "FAIL"}
+    resp <- Json.serialize respObj
   resp
 
-let retweetUser userInput =
+let retweetFn userInput =
   let mutable resp = ""
-  if registeredUsers.ContainsKey userInput.userID then
-    feedActor <! UpdateFeeds(userInput.userID,userInput.value,"ReTweet")
-    let rectype: ResponseType = {userID = userInput.userID; service="ReTweet"; message = (sprintf "%s re-tweeted:^%s" userInput.userID userInput.value); code = "OK"}
-    resp <- Json.serialize rectype
+  let userId = userInput.userID;
+  let otherUser = userInput.value;
+  
+  if userStore.ContainsKey userInput.userID then
+    feedmanager <! BroadcastToFeeds(userId, otherUser ,SERVICE_TYPE_RETWEET)
+    //let respObj: ResponseType = {userID = userInput.userID; service="ReTweet"; message = (sprintf "%s re-tweeted: %s" userInput.userID userInput.value); code = "OK"}
+    let respObj = prepareResponse (userId ,sprintf "%s has retweeted: %s" userId otherUser, SERVICE_TYPE_RETWEET ,false)
+    resp <- Json.serialize respObj
+  
   else  
-    let rectype: ResponseType = {userID = userInput.userID; service="ReTweet"; message = sprintf "Invalid request by user %s, Not registered yet!" userInput.userID; code = "FAIL"}
-    resp <- Json.serialize rectype
+    //let respObj: ResponseType = {userID = userInput.userID; service="ReTweet"; message = sprintf "Invalid request by user %s, Not registered yet!" userInput.userID; code = "FAIL"}
+    let respObj = prepareResponse (userId ,sprintf "Invalid request - user %s does not exist!" userInput.userID, SERVICE_TYPE_RETWEET ,true)
+    resp <- Json.serialize respObj
   resp
 
 let query (userInput:string) = 
   let mutable tagsstring = ""
   let mutable mentionsString = ""
   let mutable resp = ""
-  let mutable size = 10
+  let mutable maxMentionsSize = 10
+  let hashTagStart = '@'
   if userInput.Length > 0 then
-    if userInput.[0] = '@' then
+    
+    if userInput.[0] = hashTagStart then
       let searchKey = userInput.[1..(userInput.Length-1)]
-      if mentionsMap.ContainsKey searchKey then
-        let mapData:List<string> = mentionsMap.[searchKey]
-        if (mapData.Length < 10) then
-          size <- mapData.Length
-        for i in [0..(size-1)] do
-          mentionsString <- mentionsString + "-" + mapData.[i]
-        let rectype: ResponseType = {userID = ""; service="Query"; message = mentionsString; code = "OK"}
-        resp <- Json.serialize rectype
+      
+      if mentionsStore.ContainsKey searchKey then
+        let mentionsList:List<string> = mentionsStore.[searchKey]
+        
+        if (mentionsList.Length < 10) then
+          maxMentionsSize <- mentionsList.Length
+        
+        for i in [0..(maxMentionsSize-1)] do
+          mentionsString <- mentionsString + "-" + mentionsList.[i]
+        // let respObj: ResponseType = {userID = ""; service="Query"; message = mentionsString; code = "OK"}
+        let respObj = prepareResponse ("" ,mentionsString, SERVICE_TYPE_QUERY ,false)
+        resp <- Json.serialize respObj
+      
       else 
-        let rectype: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the mentioned user"; code = "OK"}
-        resp <- Json.serialize rectype
+        //let respObj: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the mentioned user"; code = "OK"}
+        let respObj = prepareResponse ("" ,"-No tweets exist with this user mentioned", SERVICE_TYPE_QUERY ,false)
+        resp <- Json.serialize respObj
+    
     else
-      let searchKey = userInput
-      if hashTagsMap.ContainsKey searchKey then
-        let mapData:List<string> = hashTagsMap.[searchKey]
+      let queryParam = userInput
+      
+      if hashTagsStore.ContainsKey queryParam then
+        let mapData:List<string> = hashTagsStore.[queryParam]
+        
         if (mapData.Length < 10) then
-            size <- mapData.Length
-        for i in [0..(size-1)] do
+            maxMentionsSize <- mapData.Length
+        
+        for i in [0..(maxMentionsSize-1)] do
             tagsstring <- tagsstring + "-" + mapData.[i]
-        let rectype: ResponseType = {userID = ""; service="Query"; message = tagsstring; code = "OK"}
-        resp <- Json.serialize rectype
+        // let respObj: ResponseType = {userID = ""; service="Query"; message = tagsstring; code = "OK"}
+        let respObj = prepareResponse ("" ,tagsstring, SERVICE_TYPE_QUERY ,false)
+        resp <- Json.serialize respObj
+      
       else 
-        let rectype: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the hashtag"; code = "OK"}
-        resp <- Json.serialize rectype
+        let respObj = prepareResponse ("" ,"-No tweets exist with this hashtag", SERVICE_TYPE_QUERY ,false)
+        //let respObj: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the hashtag"; code = "OK"}
+        resp <- Json.serialize respObj
   else
-    let rectype: ResponseType = {userID = ""; service="Query"; message = "Type something to search"; code = "FAIL"}
-    resp <- Json.serialize rectype
+    let respObj = prepareResponse ("" ,"Empty String Received For Search Query", SERVICE_TYPE_QUERY ,true)
+    //let respObj: ResponseType = {userID = ""; service="Query"; message = "Type something to search"; code = "FAIL"}
+    resp <- Json.serialize respObj
   resp
 
 
-
-let RegisterNewUserPoint = entryRequest "register" {
-  Entry = regNewUser
+let RegisterHandler = preparePostEntryFor REGISTER_ENDPOINT{
+  Entry = registerFn
 }
 
-let LoginUserPoint = entryRequest "login" {
-  Entry = loginUser
+let LoginHandler = preparePostEntryFor LOGIN_ENDPOINT {
+  Entry = loginFn
 }
 
-let FollowUserPoint = entryRequest "follow" {
-  Entry = followUser
+let FollowHandler = preparePostEntryFor FOLLOW_ENDPOINT {
+  Entry = followFn
 }
 
-let TweetUserPoint = entryRequest "tweet" {
-  Entry = tweetUser
+let TweetHandler = preparePostEntryFor TWEET_ENDPOINT {
+  Entry = tweetFn
 }
 
-let ReTweetUserPoint = entryRequest "retweet" {
-  Entry = retweetUser
+let ReTweetHandler = preparePostEntryFor RETWEET_ENDPOINT {
+  Entry = retweetFn
 }
 
-let setCORSHeaders =
-    setHeader  "Access-Control-Allow-Origin" "*"
-    >=> setHeader "Access-Control-Allow-Headers" "Content-Type"
-    >=> setHeader "Access-Control-Allow-Methods" "GET,POST"
 
+//Handles the prefight requests
 let allow_cors : WebPart =
     choose [
         OPTIONS >=>
             fun context ->
                 context |> (
                     setCORSHeaders
-                    >=> OK "CORS approved" )
+                    >=> OK "CORS Request Allowed" )
+
     ]
 
 let ws = 
   choose [
     allow_cors
-    path "/feed" >=> handShake liveFeed
-    RegisterNewUserPoint
-    LoginUserPoint
-    FollowUserPoint
-    TweetUserPoint
-    ReTweetUserPoint
+    path "/feed" >=> handShake webSocketHandler
+    RegisterHandler
+    LoginHandler
+    FollowHandler
+    TweetHandler
+    ReTweetHandler
     pathScan "/searchTwitter/%s"
-      (fun searchkey ->
-        let keyval = (sprintf "%s" searchkey)
-        let reply = query keyval
-        OK reply) 
+      (fun queryParamStr ->
+        let queryParam = (sprintf "%s" queryParamStr)
+        let resp = query queryParam
+        OK resp) 
   ]
 
 [<EntryPoint>]

@@ -24,10 +24,10 @@ export class LoginComponent implements OnInit {
     this.twitterService.userLogin(this.username,this.password).subscribe((resp)=>{
       console.log(resp);
       let respObj = JSON.parse(resp);
-        let status = respObj.code;
+        let status = respObj.status;
         let message = respObj.message;
         let userID = respObj.userID;
-        if(status == 'OK'){
+        if(status == this.twitterService.successFlag){
           this.reset();
           this.twitterService.storeUser(userID);
           this.router.navigate(["/home"]);

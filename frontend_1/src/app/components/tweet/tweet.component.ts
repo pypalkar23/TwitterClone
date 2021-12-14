@@ -20,9 +20,9 @@ export class TweetComponent implements OnInit {
     this.notificationMsg ='';
     this.twitterService.userTweet(this.tweet).subscribe((resp)=>{
       let respObj = JSON.parse(resp);
-      let status = respObj.code;
+      let status = respObj.status;
       let message = respObj.message;
-      if(status == 'OK'){
+      if(status == this.twitterService.successFlag){
         this.reset();
         this.notificationMsg = 'You have successfully tweeted a msg';
       }
