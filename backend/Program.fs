@@ -53,8 +53,6 @@ let FeedManager (mailbox:Actor<_>) =
           followSet <- Set.add userId followSet
           followerMap <- Map.remove followerId followerMap 
           followerMap <- Map.add followerId followSet followerMap
-          //let mutable jsonData: ResponseType = 
-            //{userID = followerId; service= "Follow"; code = "OK"; message = sprintf "User %s started following you!" userId}
           let respData = prepareResponse (followerId, sprintf "follow|%s|%s|User %s has started following you!" userId (DateTime.Now.ToString()) userId , SERVICE_TYPE_FOLLOW, false)
           let mutable respJson = Json.serialize respData
           msgSender.Post (respJson,activeUsersMap.[followerId])
@@ -72,7 +70,6 @@ let FeedManager (mailbox:Actor<_>) =
             if followerMap.ContainsKey followerId then
               if activeUsersMap.ContainsKey followerId then
                 let twt = sprintf "%s|%s" partialUpdate tweetMsg
-                //let jsonData: ResponseType = {userID = followerId; service=respType; code="OK"; message = twt}
                 let respData = prepareResponse(followerId, twt, respType, false)
                 let respJson = Json.serialize respData
                 msgSender.Post (respJson, activeUsersMap.[followerId])
@@ -108,7 +105,6 @@ let FeedManager (mailbox:Actor<_>) =
             userFeed<- feedHead
             responseType <- SERVICE_TYPE_LIVEFEED
 
-          // let jsonData: ResponseType = {userID = userId; message = userFeed; code = "OK"; service=responseType}
           let respData = prepareResponse(userId, userFeed, responseType, false)
           let respJson = Json.serialize respData
           msgSender.Post (respJson,userWebSkt) 
@@ -152,7 +148,6 @@ let registerFn reqData =
   let value = reqData.value
   //printf "register %s" userId
   if userStore.ContainsKey userId then
-    //let respObj: ResponseType = {userID = userId; message = sprintf "User %s has already registred. Please go to login window" userId; service = "Register"; code = "FAIL"}
     let respObj= prepareResponse (userId,"User with this name exists in the system. Please go to login window",SERVICE_TYPE_REGISTER,true) 
     respStr <- Json.serialize respObj
   
@@ -161,7 +156,6 @@ let registerFn reqData =
     followersStore <- Map.add userId Set.empty followersStore
     feedmanager <! Register(userId)
     let respObj= prepareResponse (userId,"Registeration Successful. Please go to login window",SERVICE_TYPE_REGISTER,false)
-    //let respObj: ResponseType = {userID = userId; message = sprintf "User %s has registered successfully" userId; service = "Register"; code = "OK"}
     respStr <- Json.serialize respObj
   respStr
 
@@ -172,18 +166,15 @@ let loginFn reqData =
   if userStore.ContainsKey userId then
     
     if userStore.[userId] = password then
-      //let respObj: ResponseType = {userID = userId; message = sprintf "User %s logged in successfully" userId; service = "Login"; code = "OK"}
       let respObj= prepareResponse (userId,"Login Successful",SERVICE_TYPE_LOGIN,false)
       respStr <- Json.serialize respObj
     
     else 
       let respObj= prepareResponse (userId,"Invalid Username or Password",SERVICE_TYPE_LOGIN,true)
-      //let respObj: ResponseType = {userID = userId; message = "Invalid userid / password"; service = "Login"; code = "FAIL"}
       respStr <- Json.serialize respObj
   
   else
     let respObj= prepareResponse (userId,"Invalid Username or Password",SERVICE_TYPE_LOGIN,true)
-    //let respObj: ResponseType = {userID = userId; message = "Invalid userid / password"; service = "Login"; code = "FAIL"}
     respStr <- Json.serialize respObj
   respStr
 
@@ -201,23 +192,19 @@ let followFn reqData =
         followersStore <- Map.remove otheruser followersStore
         followersStore <- Map.add otheruser tempset followersStore
         feedmanager <! SubscribeTo(userId,otheruser) 
-        //let respObj: ResponseType = {userID = userId; service="Follow"; message = sprintf "You started following %s!" otheruser; code = "OK"}
         let respObj= prepareResponse (userId ,sprintf "You started following %s!" otheruser, SERVICE_TYPE_FOLLOW ,false)
         respStr <- Json.serialize respObj
       
-      else 
-        //let respObj: ResponseType = {userID = userId; service="Follow"; message = sprintf "You are already following %s!" otheruser; code = "FAIL"}
+      else
         let respObj= prepareResponse (userId ,sprintf "You are already following %s!" otheruser, SERVICE_TYPE_FOLLOW ,true)
         respStr <- Json.serialize respObj      
     
     else
         let respObj= prepareResponse (userId ,sprintf "Invalid request, No such user (%s)." otheruser, SERVICE_TYPE_FOLLOW ,true)  
-        //let respObj: ResponseType = {userID = userId; service="Follow"; message = sprintf "Invalid request, No such user (%s)." otheruser; code = "FAIL"}
         respStr <- Json.serialize respObj
   
   else
      let respObj= prepareResponse (userId ,"You cannot follow yourself.", SERVICE_TYPE_FOLLOW ,true)
-    //let respObj: ResponseType = {userID = userId; service="Follow"; message = sprintf "You cannot follow yourself."; code = "FAIL"}
      respStr <- Json.serialize respObj   
   respStr
   
@@ -230,7 +217,6 @@ let tweetFn reqData =
     let mutable hashTag = ""
     let mutable mentionedUser = ""
     let parsed = tweetTxt.Split ' '
-    // printfn "parsed = %A" parsed
     
     for parse in parsed do
       if parse.Length > 0 then
@@ -248,19 +234,16 @@ let tweetFn reqData =
         mentionsStore <- Map.remove mentionedUser mentionsStore
         mentionsStore <- Map.add mentionedUser mList mentionsStore
         feedmanager <! BroadcastToFeeds(userId,tweetTxt,SERVICE_TYPE_TWEET)
-        let respObj= prepareResponse (userId ,sprintf "%s tweeted: %s" userId tweetTxt, SERVICE_TYPE_TWEET ,false)
-        // let respObj: ResponseType = {userID = userInput.userID; service="Tweet"; message = (sprintf "%s tweeted: %s" userInput.userID userInput.value); code = "OK"}
+        let respObj= prepareResponse (userId ,sprintf "%s has tweeted %s" userId tweetTxt, SERVICE_TYPE_TWEET ,false)
         resp <- Json.serialize respObj
       
       else
         let respObj= prepareResponse (userId ,sprintf "Invalid request, mentioned user '%s' is not registered" mentionedUser, SERVICE_TYPE_TWEET ,true)
-        //let respObj: ResponseType = {userID = userId; service="Tweet"; message = sprintf "Invalid request, mentioned user (%s) is not registered" mentionedUser; code = "FAIL"}
         resp <- Json.serialize respObj
     
     else
       feedmanager <! BroadcastToFeeds(userId,tweetTxt,SERVICE_TYPE_TWEET)
       let respObj = prepareResponse (userId ,sprintf "tweet|%s|%s|%s" userId (DateTime.Now.ToString()) tweetTxt, SERVICE_TYPE_TWEET ,false)
-      // let respObj: ResponseType = {userID = userId; service="Tweet"; message = (sprintf "%s tweeted: %s" userId tweetTxt); code = "OK"}
       resp <- Json.serialize respObj
 
     if hashTag <> "" then
@@ -273,7 +256,6 @@ let tweetFn reqData =
   
   else
     let respObj = prepareResponse (userId ,sprintf "Invalid request - user %s does not exist!" userId, SERVICE_TYPE_TWEET ,true)  
-    //let respObj: ResponseType = {userID = userId; service="Tweet"; message = sprintf "Invalid request by user %s, Not registered yet!" userId; code = "FAIL"}
     resp <- Json.serialize respObj
   resp
 
@@ -284,12 +266,10 @@ let retweetFn userInput =
   
   if userStore.ContainsKey userInput.userID then
     feedmanager <! BroadcastToFeeds(userId, otherUser ,SERVICE_TYPE_RETWEET)
-    //let respObj: ResponseType = {userID = userInput.userID; service="ReTweet"; message = (sprintf "%s re-tweeted: %s" userInput.userID userInput.value); code = "OK"}
-    let respObj = prepareResponse (userId ,sprintf "%s has retweeted: %s" userId otherUser, SERVICE_TYPE_RETWEET ,false)
+    let respObj = prepareResponse (userId ,sprintf "%s has retweeted %s" userId otherUser, SERVICE_TYPE_RETWEET ,false)
     resp <- Json.serialize respObj
   
   else  
-    //let respObj: ResponseType = {userID = userInput.userID; service="ReTweet"; message = sprintf "Invalid request by user %s, Not registered yet!" userInput.userID; code = "FAIL"}
     let respObj = prepareResponse (userId ,sprintf "Invalid request - user %s does not exist!" userInput.userID, SERVICE_TYPE_RETWEET ,true)
     resp <- Json.serialize respObj
   resp
@@ -315,12 +295,10 @@ let searchFn reqData =
         
         for i in [0..(maxMentionsSize-1)] do
           mentionsString <- mentionsString + "-" + mentionsList.[i]
-        // let respObj: ResponseType = {userID = ""; service="Query"; message = mentionsString; code = "OK"}
         let respObj = prepareResponse ("" ,mentionsString, SERVICE_TYPE_QUERY ,false)
         resp <- Json.serialize respObj
       
       else 
-        //let respObj: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the mentioned user"; code = "OK"}
         let respObj = prepareResponse ("" ,"No tweets exist with this user mentioned", SERVICE_TYPE_QUERY ,false)
         resp <- Json.serialize respObj
     
@@ -335,17 +313,14 @@ let searchFn reqData =
         
         for i in [0..(maxMentionsSize-1)] do
             tagsstring <- tagsstring + "-" + mapData.[i]
-        // let respObj: ResponseType = {userID = ""; service="Query"; message = tagsstring; code = "OK"}
         let respObj = prepareResponse ("" ,tagsstring, SERVICE_TYPE_QUERY ,false)
         resp <- Json.serialize respObj
       
       else 
         let respObj = prepareResponse ("" ,"No tweets exist with this hashtag", SERVICE_TYPE_QUERY ,false)
-        //let respObj: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the hashtag"; code = "OK"}
         resp <- Json.serialize respObj
   else
     let respObj = prepareResponse ("" ,"Empty String Received For Search Query", SERVICE_TYPE_QUERY ,true)
-    //let respObj: ResponseType = {userID = ""; service="Query"; message = "Type something to search"; code = "FAIL"}
     resp <- Json.serialize respObj
   printf "%s" resp
   resp

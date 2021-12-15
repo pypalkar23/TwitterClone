@@ -8,7 +8,6 @@ open Suave.Filters
 open Suave.Successful
 open Suave.Sockets
 open Suave.Writers
-open Suave.WebSocket
 open Constants
 
 type TwitterResponse = {
@@ -30,8 +29,6 @@ type ResourceType<'a> = {
 
 let toByteSegment (x:string) =
    x |> System.Text.Encoding.ASCII.GetBytes |> ByteSegment
-
-
 
 
 let prepareResponse (user:string, messageStr:string, serviceStr:string, error:bool ) =
