@@ -42,6 +42,7 @@ export class LoginComponent implements OnInit {
   public reset(){
     this.username = '';
     this.password = '';
+    this.isError = false;
   }
 
 }

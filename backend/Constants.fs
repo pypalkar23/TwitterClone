@@ -55,6 +55,9 @@ let RETWEET_ENDPOINT= "retweet"
 let FOLLOW_ENDPOINT= "follow"
 
 [<Literal>]
+let QUERY_ENDPOINT= "searchTwitter"
+
+[<Literal>]
 let SUCCESS_CODE = "success"
 
 [<Literal>]

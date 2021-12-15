@@ -3,10 +3,12 @@
     <div class="shadow p-3 col-lg-6 col-md-8 col-sm-12">
         <h2 class="heading">Login</h2>
 
-        <div id="emailHelp" *ngIf="notificationMsg.length>0" [ngClass]="{'errorMsg':(isError), 'successMsg':(!isError), 'form-text':true}">{{notificationMsg}}</div>
+       
         <div class="mb-3">
+            <div id="emailHelp" *ngIf="notificationMsg.length>0" [ngClass]="{'errorMsg':(isError), 'successMsg':(!isError), 'form-text':true}">{{notificationMsg}}</div>
             <label htmlFor="exampleInputEmail1" class="form-label">Username</label>
             <input type="text" class="form-control" id="exampleInputEmail1" aria-describedby="emailHelp" [(ngModel)]='username'/>
+             
         </div>
         <div class="mb-3">
             <label htmlFor="exampleInputPassword1" class="form-label">Password</label>

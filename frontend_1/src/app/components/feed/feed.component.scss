@@ -1,6 +1,6 @@
 .tweet-wrapper{
-    margin-bottom: 25px;
     min-width: 100%;
+    border-bottom: 1px solid #dfdcdc;
 }
 .tweet-txt{
     text-align: justify;
@@ -25,7 +25,12 @@
 }
 
 .tweet-txt{
-    font-size: 15px;
-    font-weight: 400;
+    font-size: 17px;
+    font-weight: 200;
+}
+
+.tweet-date{
+    font-size: 12px;
+    font-weight: 200;
 }
 

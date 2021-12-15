@@ -3,9 +3,20 @@
     <div class="shadow p-3">
       <div class="mb-3">
         <label htmlFor="exampleInputEmail1" class="form-label">Query</label>
-        <input type="text" class="form-control" id="exampleInputEmail1" aria-describedby="emailHelp" />
-        <div id="emailHelp" class="form-text">We'll never share your email with anyone else.</div>
+        <input type="text" class="form-control" id="exampleInputEmail1" aria-describedby="emailHelp" [(ngModel)]="querytext"/>
+        <div id="emailHelp" *ngIf="noTweetsFoundError.length>0" class="errorMsg form-text">{{noTweetsFoundError}}</div>
       </div>
-      <button type="submit" class="btn btn-primary">Search</button>
+      <button type="submit" class="btn btn-primary" (click)="search()">Search</button>
+      <div *ngIf="searchResult.length>0" class="results wrapper">
+        <div class="search-heading">Search Results</div>
+        <div *ngFor= "let entry of searchResult" class="tweet-wrapper justify-content-left">
+            <div class= "tweet shadow-sm p-3">
+            <div class="tweet-by">@{{entry.user}}</div>
+            <div class="tweet-txt">{{entry.text}}</div>
+            <div class="tweet-date text-end">{{entry.time}}</div>
+            </div>
+          </div>
     </div>
+    </div>
+    
   </div>

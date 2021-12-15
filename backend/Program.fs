@@ -43,11 +43,9 @@ let FeedManager (mailbox:Actor<_>) =
   let rec loop () = actor {
       let! message = mailbox.Receive() 
       match message with
-      
       | Register(userId) ->
         followerMap <- Map.add userId Set.empty followerMap
         feedMap <- Map.add userId List.empty feedMap
-      
       | SubscribeTo(userId, followerId) ->
         if followerMap.ContainsKey followerId then
           let mutable followSet = Set.empty
@@ -57,24 +55,23 @@ let FeedManager (mailbox:Actor<_>) =
           followerMap <- Map.add followerId followSet followerMap
           //let mutable jsonData: ResponseType = 
             //{userID = followerId; service= "Follow"; code = "OK"; message = sprintf "User %s started following you!" userId}
-          let respData = prepareResponse (followerId, sprintf "User %s started following you!" userId, SERVICE_TYPE_FOLLOW, false)
+          let respData = prepareResponse (followerId, sprintf "follow|%s|%s|User %s has started following you!" userId (DateTime.Now.ToString()) userId , SERVICE_TYPE_FOLLOW, false)
           let mutable respJson = Json.serialize respData
           msgSender.Post (respJson,activeUsersMap.[followerId])
-    
       | BroadcastToFeeds(userId,tweetMsg,respType) ->
         if followerMap.ContainsKey userId then
-          let mutable rtype = ""
+          let mutable partialUpdate = ""
           
-          if respType = "Tweet" then
-            rtype <- sprintf "%s has tweeted:" userId
+          if respType = SERVICE_TYPE_TWEET then
+            partialUpdate <- sprintf "tweet|%s|%s" userId (DateTime.Now.ToString())
           
           else 
-            rtype <- sprintf "%s has re-tweeted:" userId
-          
+            partialUpdate <- sprintf "retweet|%s|%s" userId (DateTime.Now.ToString())
+
           for followerId in followerMap.[userId] do 
             if followerMap.ContainsKey followerId then
               if activeUsersMap.ContainsKey followerId then
-                let twt = sprintf "%s %s" rtype tweetMsg
+                let twt = sprintf "%s|%s" partialUpdate tweetMsg
                 //let jsonData: ResponseType = {userID = followerId; service=respType; code="OK"; message = twt}
                 let respData = prepareResponse(followerId, twt, respType, false)
                 let respJson = Json.serialize respData
@@ -82,7 +79,7 @@ let FeedManager (mailbox:Actor<_>) =
               let mutable listy = []
               if feedMap.ContainsKey followerId then
                   listy <- feedMap.[followerId]
-              listy  <- (sprintf "%s %s" rtype tweetMsg) :: listy
+              listy  <- (sprintf "%s|%s" partialUpdate tweetMsg) :: listy
               feedMap <- Map.remove followerId feedMap
               feedMap <- Map.add followerId listy feedMap
 
@@ -247,7 +244,7 @@ let tweetFn reqData =
         if not (mentionsStore.ContainsKey mentionedUser) then
             mentionsStore <- Map.add mentionedUser List.empty mentionsStore
         let mutable mList = mentionsStore.[mentionedUser]
-        mList <- (sprintf "%s tweeted: %s" userId tweetTxt) :: mList
+        mList <- (sprintf "tweet|%s|%s|%s" userId (DateTime.Now.ToString()) tweetTxt) :: mList
         mentionsStore <- Map.remove mentionedUser mentionsStore
         mentionsStore <- Map.add mentionedUser mList mentionsStore
         feedmanager <! BroadcastToFeeds(userId,tweetTxt,SERVICE_TYPE_TWEET)
@@ -262,7 +259,7 @@ let tweetFn reqData =
     
     else
       feedmanager <! BroadcastToFeeds(userId,tweetTxt,SERVICE_TYPE_TWEET)
-      let respObj = prepareResponse (userId ,sprintf "%s tweeted: %s" userId tweetTxt, SERVICE_TYPE_TWEET ,false)
+      let respObj = prepareResponse (userId ,sprintf "tweet|%s|%s|%s" userId (DateTime.Now.ToString()) tweetTxt, SERVICE_TYPE_TWEET ,false)
       // let respObj: ResponseType = {userID = userId; service="Tweet"; message = (sprintf "%s tweeted: %s" userId tweetTxt); code = "OK"}
       resp <- Json.serialize respObj
 
@@ -270,7 +267,7 @@ let tweetFn reqData =
       if not (hashTagsStore.ContainsKey hashTag) then
         hashTagsStore <- Map.add hashTag List.empty hashTagsStore
       let mutable tList = hashTagsStore.[hashTag]
-      tList <- (sprintf "%s tweeted: %s" userId tweetTxt) :: tList
+      tList <- (sprintf "tweet|%s|%s|%s" userId (DateTime.Now.ToString()) tweetTxt) :: tList
       hashTagsStore <- Map.remove hashTag hashTagsStore
       hashTagsStore <- Map.add hashTag tList hashTagsStore
   
@@ -322,7 +319,7 @@ let query (userInput:string) =
       
       else 
         //let respObj: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the mentioned user"; code = "OK"}
-        let respObj = prepareResponse ("" ,"-No tweets exist with this user mentioned", SERVICE_TYPE_QUERY ,false)
+        let respObj = prepareResponse ("" ,"No tweets exist with this user mentioned", SERVICE_TYPE_QUERY ,false)
         resp <- Json.serialize respObj
     
     else
@@ -341,13 +338,70 @@ let query (userInput:string) =
         resp <- Json.serialize respObj
       
       else 
-        let respObj = prepareResponse ("" ,"-No tweets exist with this hashtag", SERVICE_TYPE_QUERY ,false)
+        let respObj = prepareResponse ("" ,"No tweets exist with this hashtag", SERVICE_TYPE_QUERY ,false)
         //let respObj: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the hashtag"; code = "OK"}
         resp <- Json.serialize respObj
   else
     let respObj = prepareResponse ("" ,"Empty String Received For Search Query", SERVICE_TYPE_QUERY ,true)
     //let respObj: ResponseType = {userID = ""; service="Query"; message = "Type something to search"; code = "FAIL"}
     resp <- Json.serialize respObj
+  resp
+
+
+let searchFn reqData = 
+  let mutable tagsstring = ""
+  let mutable mentionsString = ""
+  let mutable resp = ""
+  let mutable maxMentionsSize = 10
+  let hashTagStart = '@'
+  let searchQuery = reqData.value
+  printfn "%s" searchQuery
+  if searchQuery.Length > 0 then
+    
+    if searchQuery.[0] = hashTagStart then
+      let searchKey = searchQuery.[1..(searchQuery.Length-1)]
+      
+      if mentionsStore.ContainsKey searchKey then
+        let mentionsList:List<string> = mentionsStore.[searchKey]
+        
+        if (mentionsList.Length < 10) then
+          maxMentionsSize <- mentionsList.Length
+        
+        for i in [0..(maxMentionsSize-1)] do
+          mentionsString <- mentionsString + "-" + mentionsList.[i]
+        // let respObj: ResponseType = {userID = ""; service="Query"; message = mentionsString; code = "OK"}
+        let respObj = prepareResponse ("" ,mentionsString, SERVICE_TYPE_QUERY ,false)
+        resp <- Json.serialize respObj
+      
+      else 
+        //let respObj: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the mentioned user"; code = "OK"}
+        let respObj = prepareResponse ("" ,"No tweets exist with this user mentioned", SERVICE_TYPE_QUERY ,false)
+        resp <- Json.serialize respObj
+    
+    else
+      let queryParam = searchQuery
+      
+      if hashTagsStore.ContainsKey queryParam then
+        let mapData:List<string> = hashTagsStore.[queryParam]
+        
+        if (mapData.Length < 10) then
+            maxMentionsSize <- mapData.Length
+        
+        for i in [0..(maxMentionsSize-1)] do
+            tagsstring <- tagsstring + "-" + mapData.[i]
+        // let respObj: ResponseType = {userID = ""; service="Query"; message = tagsstring; code = "OK"}
+        let respObj = prepareResponse ("" ,tagsstring, SERVICE_TYPE_QUERY ,false)
+        resp <- Json.serialize respObj
+      
+      else 
+        let respObj = prepareResponse ("" ,"No tweets exist with this hashtag", SERVICE_TYPE_QUERY ,false)
+        //let respObj: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the hashtag"; code = "OK"}
+        resp <- Json.serialize respObj
+  else
+    let respObj = prepareResponse ("" ,"Empty String Received For Search Query", SERVICE_TYPE_QUERY ,true)
+    //let respObj: ResponseType = {userID = ""; service="Query"; message = "Type something to search"; code = "FAIL"}
+    resp <- Json.serialize respObj
+  printf "%s" resp
   resp
 
 
@@ -371,6 +425,10 @@ let ReTweetHandler = preparePostEntryFor RETWEET_ENDPOINT {
   Entry = retweetFn
 }
 
+let searchTwitterHandler = preparePostEntryFor QUERY_ENDPOINT{
+    Entry= searchFn
+}
+
 
 //Handles the prefight requests
 let allow_cors : WebPart =
@@ -392,11 +450,7 @@ let ws =
     FollowHandler
     TweetHandler
     ReTweetHandler
-    pathScan "/searchTwitter/%s"
-      (fun queryParamStr ->
-        let queryParam = (sprintf "%s" queryParamStr)
-        let resp = query queryParam
-        OK resp) 
+    searchTwitterHandler
   ]
 
 [<EntryPoint>]

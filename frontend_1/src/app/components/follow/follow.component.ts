@@ -25,6 +25,7 @@ export class FollowComponent implements OnInit {
       let message = respObj.message;
       if (status == this.twitterService.successFlag) {
         this.reset();
+        this.isError = false;
       }
       else {
         this.isError = true;

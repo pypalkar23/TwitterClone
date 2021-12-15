@@ -11,6 +11,7 @@ const LOGIN_URL: string = `${environment.apiBase}/login`
 const REGISTER_URL: string = `${environment.apiBase}/register`
 const RETWEET_URL: string = `${environment.apiBase}/retweet`
 const FOLLOW_URL: string = `${environment.apiBase}/follow`
+const SEARCH_URL: string = `${environment.apiBase}/searchTwitter`
 
 @Injectable({
   providedIn: 'root'
@@ -24,9 +25,7 @@ export class TwitterService {
 
   constructor(private http: HttpClient) {
     //this.initializeWebSocket();
-    if(this.webSocket==null){
-      this.initializeWebSocket();
-    }
+    
   }
 
   storeUser(userId: string) {
@@ -43,6 +42,8 @@ export class TwitterService {
   }
 
   initializeWebSocket() {
+    if (this.webSocket!= null)
+      return;
     //console.log(websocketurl);
     this.webSocket = webSocket(websocketurl);
     this.webSocket.subscribe(
@@ -113,6 +114,10 @@ export class TwitterService {
 
   userRetweet(val:string){
     return this.http.post<any>(RETWEET_URL,{userID:this.getUser(),value:val})
+  }
+
+  userSearch(val:string){
+    return this.http.post<any>(SEARCH_URL,{userID:this.getUser(),value:val})
   }
   
 }

@@ -19,6 +19,10 @@ export class NavbarComponent implements OnInit {
     return this.twitterService.isLoggedIn();
   }
 
+  getUserName(){
+    return this.twitterService.getUser();
+  }
+
   logout(){
     this.twitterService.removeUser();
     this.router.navigate(["/login"]);

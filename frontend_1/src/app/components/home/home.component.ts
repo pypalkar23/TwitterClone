@@ -16,7 +16,8 @@ export class HomeComponent implements OnInit {
   ngOnInit(): void {
     if(!this.twitterService.isLoggedIn()){
       this.router.navigate(["/login"]);
+      return;
     }
+    this.twitterService.initializeWebSocket();
   }
-
 }

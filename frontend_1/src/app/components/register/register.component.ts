@@ -31,6 +31,7 @@ export class RegisterComponent implements OnInit {
         let message = respObj.message;
         if(status == this.twitterService.successFlag){
           this.reset();
+
         }
         else{
           this.isError = true;
@@ -45,6 +46,7 @@ export class RegisterComponent implements OnInit {
   public reset(){
     this.username = '';
     this.password = '';
+    this.isError = false;
   }
 
 
