@@ -294,60 +294,6 @@ let retweetFn userInput =
     resp <- Json.serialize respObj
   resp
 
-let query (userInput:string) = 
-  let mutable tagsstring = ""
-  let mutable mentionsString = ""
-  let mutable resp = ""
-  let mutable maxMentionsSize = 10
-  let hashTagStart = '@'
-  if userInput.Length > 0 then
-    
-    if userInput.[0] = hashTagStart then
-      let searchKey = userInput.[1..(userInput.Length-1)]
-      
-      if mentionsStore.ContainsKey searchKey then
-        let mentionsList:List<string> = mentionsStore.[searchKey]
-        
-        if (mentionsList.Length < 10) then
-          maxMentionsSize <- mentionsList.Length
-        
-        for i in [0..(maxMentionsSize-1)] do
-          mentionsString <- mentionsString + "-" + mentionsList.[i]
-        // let respObj: ResponseType = {userID = ""; service="Query"; message = mentionsString; code = "OK"}
-        let respObj = prepareResponse ("" ,mentionsString, SERVICE_TYPE_QUERY ,false)
-        resp <- Json.serialize respObj
-      
-      else 
-        //let respObj: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the mentioned user"; code = "OK"}
-        let respObj = prepareResponse ("" ,"No tweets exist with this user mentioned", SERVICE_TYPE_QUERY ,false)
-        resp <- Json.serialize respObj
-    
-    else
-      let queryParam = userInput
-      
-      if hashTagsStore.ContainsKey queryParam then
-        let mapData:List<string> = hashTagsStore.[queryParam]
-        
-        if (mapData.Length < 10) then
-            maxMentionsSize <- mapData.Length
-        
-        for i in [0..(maxMentionsSize-1)] do
-            tagsstring <- tagsstring + "-" + mapData.[i]
-        // let respObj: ResponseType = {userID = ""; service="Query"; message = tagsstring; code = "OK"}
-        let respObj = prepareResponse ("" ,tagsstring, SERVICE_TYPE_QUERY ,false)
-        resp <- Json.serialize respObj
-      
-      else 
-        let respObj = prepareResponse ("" ,"No tweets exist with this hashtag", SERVICE_TYPE_QUERY ,false)
-        //let respObj: ResponseType = {userID = ""; service="Query"; message = "-No tweets found for the hashtag"; code = "OK"}
-        resp <- Json.serialize respObj
-  else
-    let respObj = prepareResponse ("" ,"Empty String Received For Search Query", SERVICE_TYPE_QUERY ,true)
-    //let respObj: ResponseType = {userID = ""; service="Query"; message = "Type something to search"; code = "FAIL"}
-    resp <- Json.serialize respObj
-  resp
-
-
 let searchFn reqData = 
   let mutable tagsstring = ""
   let mutable mentionsString = ""
