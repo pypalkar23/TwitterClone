@@ -303,7 +303,7 @@ let searchFn reqData =
         resp <- Json.serialize respObj
     
     else
-      let queryParam = searchQuery
+      let queryParam = searchQuery.[1..(searchQuery.Length-1)]
       
       if hashTagsStore.ContainsKey queryParam then
         let mapData:List<string> = hashTagsStore.[queryParam]
