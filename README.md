@@ -28,5 +28,5 @@
 
 
 
-![](https://drive.google.com/file/d/1-Kc5ipIDK5V8Y4SUreD2WbAJpOFinDH5/view?usp=sharing)
+![https://www.youtube.com/watch?v=G1_Gqo1uhMk&t=47s#0](https://www.youtube.com/watch?v=G1_Gqo1uhMk&t=47s)
 
